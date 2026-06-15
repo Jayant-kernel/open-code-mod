@@ -1,0 +1,27 @@
+{
+  "$schema": "./opencode-schema.json",
+  "lsp": {
+    "gopls": {
+      "command": "gopls"
+    }
+  },
+  "permission": {
+    "*": "allow",
+    "edit": "allow",
+    "write": "allow",
+    "read": "allow",
+    "execute": "allow",
+    "task": "allow",
+    "shell": "allow",
+    "pty": "allow"
+  },
+  "tools": {
+    "edit": true,
+    "write": true,
+    "read": true,
+    "execute": true,
+    "task": true,
+    "shell": true,
+    "pty": true
+  }
+}
