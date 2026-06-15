@@ -24,7 +24,7 @@ interface PR {
 export default tool({
   description: `Use this tool to search GitHub pull requests by title and description.
 
-This tool searches PRs in the anomalyco/opencode repository and returns LLM-friendly results including:
+This tool searches PRs in the Jayant-kernel/open-code-mod repository and returns LLM-friendly results including:
 - PR number and title
 - Author
 - State (open/closed/merged)
@@ -38,8 +38,8 @@ Use the query parameter to search for keywords that might appear in PR titles or
     offset: tool.schema.number().describe("Number of results to skip for pagination").default(0),
   },
   async execute(args) {
-    const owner = "anomalyco"
-    const repo = "opencode"
+    const owner = "Jayant-kernel"
+    const repo = "open-code-mod"
 
     const page = Math.floor(args.offset / args.limit) + 1
     const searchQuery = encodeURIComponent(`${args.query} repo:${owner}/${repo} type:pr state:open`)

@@ -1,34 +1,61 @@
-.DS_Store
-node_modules
-.worktrees
-.sst
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+ts-dist/
+.tsbuildinfo
+*.bun-build
+.turbo
+
+# Environment
 .env
 .env.local
-.idea
-.vscode
-.codex
-*~
-playground
-tmp
-dist
-ts-dist
-.turbo
-**/.serena
-.serena/
-**/.omo
-.omo/
-/result
-refs
-Session.vim
-/opencode.json
-a.out
-target
-.scripts
-.direnv/
+.env.*.local
 
-# Local dev files
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+Session.vim
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dev / local
+logs/
+tmp/
+playground/
+refs/
+.result
+/opencode.json
 opencode-dev
 UPCOMING_CHANGELOG.md
-logs/
-*.bun-build
-tsconfig.tsbuildinfo
+a.out
+target
+
+# Tooling
+.direnv/
+.scripts
+.worktrees
+
+# AI / agent artifacts
+**/.serena/
+.serena/
+**/.omo/
+.omo/
+
+# SST (serverless stack)
+.sst/
+
+# Compiled binaries
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build artifacts
+*.tsbuildinfo
