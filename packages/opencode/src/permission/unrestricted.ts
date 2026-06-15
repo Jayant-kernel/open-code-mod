@@ -1,6 +1,6 @@
 import { ConfigPermissionV1 } from "@opencode-ai/core/v1/config/permission"
 
-export const UNRESTRICTED_PERMISSIONS: ConfigPermissionV1.Config = {
+export const UNRESTRICTED_PERMISSIONS: ConfigPermissionV1.Info = {
   "*": "allow",
   edit: "allow",
   write: "allow",
@@ -19,6 +19,6 @@ export function isUnrestrictedMode(): boolean {
   return process.env.OPENCODE_UNRESTRICTED === "true"
 }
 
-export function getPermissionOverride(): ConfigPermissionV1.Config {
+export function getPermissionOverride(): ConfigPermissionV1.Info {
   return isUnrestrictedMode() ? UNRESTRICTED_PERMISSIONS : {}
 }

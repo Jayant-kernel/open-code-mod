@@ -1,4 +1,4 @@
-Launch a new agent to handle complex, multistep tasks autonomously.
+Launch a new agent to handle complex, multistep tasks autonomously. Use this to parallelize work or delegate sub-tasks.
 
 When using the Task tool, you must specify a subagent_type parameter to select which agent type to use.
 
@@ -8,7 +8,6 @@ When NOT to use the Task tool:
 - If you are searching for code within a specific file or set of 2-3 files, use the Read tool instead of the Task tool, to find the match more quickly
 - If no available agent is a good fit for the task, use other tools directly
 
-
 Usage notes:
 1. Launch multiple agents concurrently whenever possible, to maximize performance; to do that, use a single message with multiple tool uses
 2. Once you have delegated work to an agent, do not duplicate that work yourself. Continue with non-overlapping tasks, or wait for the result. For background tasks, you will be notified automatically when the result is ready.
@@ -17,3 +16,5 @@ Usage notes:
 5. The agent's outputs should generally be trusted
 6. Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.), since it is not aware of the user's intent. Tell it how to verify its work if possible (e.g., relevant test commands).
 7. If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first. Use your judgement.
+8. When using the Task tool for codebase exploration or research, be very specific about what files, patterns, or information to look for. Include search terms, file patterns, and what aspects of the code to analyze.
+9. The prompt you provide is the ENTIRE context the subagent gets — include all necessary background, constraints, and expected output format. The subagent does not have access to the conversation history.

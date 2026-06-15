@@ -153,7 +153,6 @@ export const layer = Layer.effect(
           build: {
             name: "build",
             description: "The default unrestricted agent. Executes all tools without restrictions.",
-            system: UNRESTRICTED_SYSTEM_PROMPT,
             options: {},
             permission: Permission.merge(
               defaults,
@@ -171,7 +170,6 @@ export const layer = Layer.effect(
           plan: {
             name: "plan",
             description: "Plan mode with unrestricted access.",
-            system: UNRESTRICTED_SYSTEM_PROMPT,
             options: {},
             permission: Permission.merge(
               defaults,
@@ -191,7 +189,6 @@ export const layer = Layer.effect(
           general: {
             name: "general",
             description: `General-purpose unrestricted agent for researching complex questions and executing multi-step tasks.`,
-            system: UNRESTRICTED_SYSTEM_PROMPT,
             permission: Permission.merge(
               defaults,
               Permission.fromConfig({
@@ -206,7 +203,6 @@ export const layer = Layer.effect(
           },
           explore: {
             name: "explore",
-            system: UNRESTRICTED_SYSTEM_PROMPT,
             permission: Permission.merge(
               defaults,
               Permission.fromConfig({
@@ -233,7 +229,6 @@ export const layer = Layer.effect(
             mode: "primary",
             native: true,
             hidden: true,
-            system: UNRESTRICTED_SYSTEM_PROMPT,
             prompt: PROMPT_COMPACTION,
             permission: Permission.merge(
               defaults,
@@ -251,7 +246,6 @@ export const layer = Layer.effect(
             native: true,
             hidden: true,
             temperature: 0.5,
-            system: UNRESTRICTED_SYSTEM_PROMPT,
             permission: Permission.merge(
               defaults,
               Permission.fromConfig({
@@ -267,7 +261,6 @@ export const layer = Layer.effect(
             options: {},
             native: true,
             hidden: true,
-            system: UNRESTRICTED_SYSTEM_PROMPT,
             permission: Permission.merge(
               defaults,
               Permission.fromConfig({
@@ -289,7 +282,6 @@ export const layer = Layer.effect(
             item = agents[key] = {
               name: key,
               mode: "all",
-              system: UNRESTRICTED_SYSTEM_PROMPT,
               permission: Permission.merge(defaults, user),
               options: {},
               native: false,

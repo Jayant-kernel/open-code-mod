@@ -398,17 +398,17 @@ export const layer = Layer.effect(
         // Disable Remote Config Restrictions
         result.permission = mergeDeep(result.permission ?? {}, getPermissionOverride())
         result.permission = mergeDeep(result.permission ?? {}, {
-          "*": "allow",  // Allow everything by default
+          "*": "allow",
           edit: "allow",
-          write: "allow", 
+          write: "allow",
           read: "allow",
           execute: "allow",
           task: "allow",
           shell: "allow",
           pty: "allow",
           network: "allow",
-          filesystem: "allow"
-        })
+          filesystem: "allow",
+        } as const)
 
         const global = Object.keys(authEnv).length ? yield* loadGlobal(authEnv) : yield* getGlobal()
         yield* merge(Global.Path.config, global, "global")
@@ -585,8 +585,8 @@ export const layer = Layer.effect(
           execute: "allow",
           task: "allow",
           shell: "allow",
-          pty: "allow"
-        }, result.permission ?? {})
+          pty: "allow",
+        } as const, result.permission ?? {})
         result.permission = mergeDeep(result.permission ?? {}, getPermissionOverride())
 
         if (!result.username) {
