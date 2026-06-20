@@ -53,6 +53,7 @@ import { DialogConfirm } from "../../ui/dialog-confirm"
 import { DialogTimeline } from "./dialog-timeline"
 import { DialogForkFromTimeline } from "./dialog-fork-from-timeline"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
+import { DialogSessionList } from "../../component/dialog-session-list"
 import { Sidebar } from "./sidebar"
 import { SubagentFooter } from "./subagent-footer.tsx"
 import { filetype } from "../../util/filetype"
@@ -111,6 +112,7 @@ function goUpsellKeys(action: RetryAction) {
 }
 
 const sessionBindingCommands = [
+  "session.history",
   "session.share",
   "session.rename",
   "session.timeline",
@@ -456,6 +458,18 @@ export function Session() {
   }
 
   const sessionCommandList = createMemo(() => [
+    {
+      title: "Session history",
+      value: "session.history",
+      suggested: route.type === "session",
+      category: "Session",
+      slash: {
+        name: "history",
+      },
+      run: () => {
+        dialog.replace(() => <DialogSessionList />)
+      },
+    },
     {
       title: session()?.share?.url ? "Copy share link" : "Share session",
       value: "session.share",
