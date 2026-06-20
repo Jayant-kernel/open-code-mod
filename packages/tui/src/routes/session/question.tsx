@@ -158,51 +158,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
         },
       },
       ...tuiConfig.keybinds.get("prompt.clear"),
-      {
-        key: "return",
-        desc: "Submit answer edit",
-        group: "Question",
-        cmd: () => {
-          const text = textarea?.plainText?.trim() ?? ""
-          const prev = store.custom[store.tab]
 
-          if (!text) {
-            if (prev) {
-              const inputs = [...store.custom]
-              inputs[store.tab] = ""
-              setStore("custom", inputs)
-
-              const answers = [...store.answers]
-              answers[store.tab] = (answers[store.tab] ?? []).filter((x) => x !== prev)
-              setStore("answers", answers)
-            }
-            setStore("editing", false)
-            return
-          }
-
-          if (multi()) {
-            const inputs = [...store.custom]
-            inputs[store.tab] = text
-            setStore("custom", inputs)
-
-            const existing = store.answers[store.tab] ?? []
-            const next = [...existing]
-            if (prev) {
-              const index = next.indexOf(prev)
-              if (index !== -1) next.splice(index, 1)
-            }
-            if (!next.includes(text)) next.push(text)
-            const answers = [...store.answers]
-            answers[store.tab] = next
-            setStore("answers", answers)
-            setStore("editing", false)
-            return
-          }
-
-          pick(text, true)
-          setStore("editing", false)
-        },
-      },
     ],
   }))
 
@@ -441,6 +397,43 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
                         textColor={theme.text}
                         focusedTextColor={theme.text}
                         cursorColor={theme.primary}
+                        onSubmit={() => {
+                          setTimeout(() => {
+                            const text = textarea?.plainText?.trim() ?? ""
+                            const prev = store.custom[store.tab]
+                            if (!text) {
+                              if (prev) {
+                                const inputs = [...store.custom]
+                                inputs[store.tab] = ""
+                                setStore("custom", inputs)
+                                const answers = [...store.answers]
+                                answers[store.tab] = (answers[store.tab] ?? []).filter((x) => x !== prev)
+                                setStore("answers", answers)
+                              }
+                              setStore("editing", false)
+                              return
+                            }
+                            if (multi()) {
+                              const inputs = [...store.custom]
+                              inputs[store.tab] = text
+                              setStore("custom", inputs)
+                              const existing = store.answers[store.tab] ?? []
+                              const next = [...existing]
+                              if (prev) {
+                                const index = next.indexOf(prev)
+                                if (index !== -1) next.splice(index, 1)
+                              }
+                              if (!next.includes(text)) next.push(text)
+                              const answers = [...store.answers]
+                              answers[store.tab] = next
+                              setStore("answers", answers)
+                              setStore("editing", false)
+                              return
+                            }
+                            pick(text, true)
+                            setStore("editing", false)
+                          }, 0)
+                        }}
                       />
                     </box>
                   </Show>
