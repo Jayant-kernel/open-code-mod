@@ -57,6 +57,7 @@ type Input = {
   assistantMessage: SessionV1.Assistant
   sessionID: SessionID
   model: Provider.Model
+  checkSupervisor?: (input: { toolId: string; toolName: string; error: string }) => Effect.Effect<"retry" | "switch-agent" | "escalate" | "skip">
 }
 
 export interface Interface {
@@ -648,6 +649,15 @@ export const layer = Layer.effect(
 
           case "tool-error": {
             const toolCall = yield* readToolCall(value.id)
+            // Check supervisor for tool error pattern
+            if (ctx.checkSupervisor) {
+              const strategy = yield* ctx.checkSupervisor({
+                toolId: value.id,
+                toolName: value.name,
+                error: value.message,
+              })
+              if (strategy === "skip") return
+            }
             // TODO(v2): Temporary dual-write while migrating session messages to v2 events.
             if (mirrorAssistant) {
               const assistantMessageID = yield* requireV2AssistantMessage(toolCall?.call)

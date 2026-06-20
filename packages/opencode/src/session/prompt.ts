@@ -60,6 +60,7 @@ import { eq } from "drizzle-orm"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
+import { Planning } from "./planning"
 import { LLMEvent } from "@opencode-ai/llm"
 
 // @ts-ignore
@@ -1004,6 +1005,37 @@ export const layer = Layer.effect(
           : Effect.succeed(part),
       )
 
+      // Save pasted images to a temp directory so the AI can read them with tools
+      const tempDir = path.join(os.tmpdir(), "opencode-images")
+      const savedImages: Array<{ filePath: string }> = []
+      for (const part of parts) {
+        if (part.type !== "file" || !part.mime.startsWith("image/") || !part.url.startsWith("data:")) continue
+        const comma = part.url.indexOf(",")
+        if (comma === -1) continue
+        const head = part.url.slice(0, comma)
+        if (!head.includes(";base64,")) continue
+        const base64 = part.url.slice(comma + 1)
+        const ext = part.mime.split("/")[1] ?? "png"
+        const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+        const filePath = path.join(tempDir, filename)
+        yield* fsys.writeWithDirs(filePath, Buffer.from(base64, "base64")).pipe(
+          Effect.catch(() => Effect.void),
+        )
+        savedImages.push({ filePath })
+      }
+      if (savedImages.length > 0) {
+        for (const { filePath } of savedImages) {
+          parts.push({
+            type: "text" as const,
+            synthetic: true,
+            id: PartID.ascending(),
+            messageID: info.id,
+            sessionID: input.sessionID,
+            text: `[Image saved: ${filePath}]`,
+          })
+        }
+      }
+
       const parsed = decodeMessageInfo(info, { errors: "all", propertyOrder: "original" })
       if (Exit.isFailure(parsed)) {
         yield* Effect.logError("invalid user message before save", {
@@ -1273,6 +1305,7 @@ export const layer = Layer.effect(
               assistantMessage: msg,
               sessionID,
               model,
+              checkSupervisor: (input) => compaction.checkSupervisor(input),
             })
             .pipe(Effect.onInterrupt(() => finalizeInterruptedAssistant))
 
@@ -1344,6 +1377,7 @@ export const layer = Layer.effect(
               ...env,
               ...instructions,
               ...(skills ? [skills] : []),
+              Planning.PLANNING_INSTRUCTION,
             ]
 
             const format = lastUser.format ?? { type: "text" as const }

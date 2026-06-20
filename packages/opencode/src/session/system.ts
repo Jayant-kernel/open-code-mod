@@ -1,5 +1,6 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Context, Effect, Layer } from "effect"
+import { execSync } from "child_process"
 
 import { InstanceState } from "@/effect/instance-state"
 
@@ -60,6 +61,23 @@ export const layer = Layer.effect(
     const skill = yield* Skill.Service
     const locations = yield* LocationServiceMap
 
+    const gitContext = Effect.fn("SystemPrompt.gitContext")(function* (worktree: string) {
+      const run = (args: string[]) => {
+        const cmd = `git -C "${worktree}" ${args.join(" ")}`
+        return Effect.sync(() => execSync(cmd, { encoding: "utf8", timeout: 3000 }).trim()).pipe(
+          Effect.catch(() => Effect.succeed("")),
+        )
+      }
+      const branch = yield* run(["symbolic-ref", "--quiet", "--short", "HEAD"])
+      const status = yield* run(["status", "--short"])
+      const log = yield* run(["log", "--oneline", "-5"])
+      const lines: string[] = []
+      if (branch) lines.push(`  Current branch: ${branch}`)
+      if (log) lines.push(`  Recent commits:\n${log.split("\n").map((l) => `    ${l}`).join("\n")}`)
+      if (status) lines.push(`  Working tree changes:\n${status.split("\n").map((l) => `    ${l}`).join("\n")}`)
+      return lines
+    })
+
     return Service.of({
       environment: Effect.fn("SystemPrompt.environment")(function* (model: Provider.Model) {
         const ctx = yield* InstanceState.context
@@ -67,6 +85,7 @@ export const layer = Layer.effect(
           yield* (yield* PluginBoot.Service).wait()
           return (yield* (yield* Reference.Service).list()).filter((reference) => reference.description !== undefined)
         }).pipe(Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))))
+        const gitLines = ctx.project.vcs === "git" ? yield* gitContext(ctx.directory) : []
 
         // The unrestricted jailbreak is injected by SystemPrompt.provider() at the request
         // preparation layer. Environment provides workspace context and references only.
@@ -80,6 +99,7 @@ export const layer = Layer.effect(
             `  Is directory a git repo: ${ctx.project.vcs === "git" ? "yes" : "no"}`,
             `  Platform: ${process.platform}`,
             `  Today's date: ${new Date().toDateString()}`,
+            ...gitLines,
             `</env>`,
           ].join("\n"),
           references.length === 0

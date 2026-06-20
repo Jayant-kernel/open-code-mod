@@ -12,7 +12,7 @@ import { Plugin } from "@/plugin"
 import { Config } from "@/config/config"
 import { NotFoundError } from "@/storage/storage"
 
-import { Effect, Layer, Context } from "effect"
+import { Effect, Layer, Context, Schema } from "effect"
 import * as DateTime from "effect/DateTime"
 import { InstanceState } from "@/effect/instance-state"
 import { isOverflow as overflow, usable } from "./overflow"
@@ -31,6 +31,7 @@ export const Event = {
     type: "session.compacted",
     schema: {
       sessionID: SessionID,
+      tier: Schema.String.pipe(Schema.optional),
     },
   }),
 }
@@ -42,6 +43,22 @@ const PRUNE_PROTECTED_TOOLS = ["skill"]
 const DEFAULT_TAIL_TURNS = 2
 const MIN_PRESERVE_RECENT_TOKENS = 2_000
 const MAX_PRESERVE_RECENT_TOKENS = 8_000
+
+// Multi-tier compaction thresholds
+const TIER_1_THRESHOLD = 0.70  // 70% context: microcompaction (prune tool outputs)
+const TIER_2_THRESHOLD = 0.85  // 85% context: light summarization
+const TIER_3_THRESHOLD = 0.93  // 93% context: full summarization
+const TIER_4_THRESHOLD = 0.97  // 97% context: aggressive fork-based
+
+// Memory tier constants
+const ACTIVE_WINDOW_TURNS = 3    // Always keep fully detailed
+const WORKING_WINDOW_TURNS = 8   // Semi-detailed (compressed tool outputs)
+const ARCHIVE_SUMMARY_TOKENS = 2_000  // Max tokens per archived summary
+
+// Supervisor constants
+const SUPERVISOR_RETRY_THRESHOLD = 3
+const SUPERVISOR_COOLDOWN_MS = 30_000
+
 type Turn = {
   start: number
   end: number
@@ -57,6 +74,28 @@ type CompletedCompaction = {
   userIndex: number
   assistantIndex: number
   summary: string | undefined
+}
+
+// --- Multi-tier compaction types ---
+
+export type CompactionTier = "none" | "micro" | "light" | "mid" | "full" | "fork"
+
+export type MemoryTier = "active" | "working" | "archived"
+
+export type MemoryState = {
+  activeTurns: Turn[]
+  workingTurns: Turn[]
+  archivedSummaries: string[]
+  tier: CompactionTier
+  lastCompactionSeq: number
+}
+
+export type SupervisorState = {
+  consecutiveFailures: number
+  lastFailureAt: number | null
+  lastToolId: string | null
+  strategy: "retry" | "switch-agent" | "escalate" | "skip"
+  cooldownUntil: number | null
 }
 
 function summaryText(message: SessionV1.WithParts) {
@@ -157,6 +196,18 @@ export interface Interface {
     auto: boolean
     overflow?: boolean
   }) => Effect.Effect<void>
+  readonly selectTier: (input: {
+    tokens: SessionV1.Assistant["tokens"]
+    model: Provider.Model
+    messages: SessionV1.WithParts[]
+  }) => Effect.Effect<CompactionTier>
+  readonly microCompact: (input: { sessionID: SessionID }) => Effect.Effect<boolean>
+  readonly checkSupervisor: (input: {
+    toolId: string
+    toolName: string
+    error: string
+  }) => Effect.Effect<SupervisorState["strategy"]>
+  readonly resetSupervisor: () => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionCompaction") {}
@@ -248,12 +299,195 @@ export const layer = Layer.effect(
       }
     })
 
+    // --- Multi-tier compaction engine ---
+
+    const usageRatio = Effect.fn("SessionCompaction.usageRatio")(function* (input: {
+      tokens: SessionV1.Assistant["tokens"]
+      model: Provider.Model
+    }) {
+      const cfg = yield* config.get()
+      const usable_ = usable({ cfg, model: input.model, outputTokenMax: flags.outputTokenMax })
+      if (usable_ <= 0) return 0
+      const count =
+        input.tokens.total ||
+        input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
+      return count / usable_
+    })
+
+    const selectTier = Effect.fn("SessionCompaction.selectTier")(function* (input: {
+      tokens: SessionV1.Assistant["tokens"]
+      model: Provider.Model
+      messages: SessionV1.WithParts[]
+    }) {
+      const ratio = yield* usageRatio({ tokens: input.tokens, model: input.model })
+      if (ratio >= TIER_4_THRESHOLD) return "fork"
+      if (ratio >= TIER_3_THRESHOLD) return "full"
+      if (ratio >= TIER_2_THRESHOLD) return "mid"
+      if (ratio >= TIER_1_THRESHOLD) return "light"
+      // Check if microcompaction would help even below tier 1
+      const toolParts = input.messages.flatMap((m) =>
+        m.parts.filter((p): p is SessionV1.ToolPart => p.type === "tool" && p.state.status === "completed" && !p.state.time.compacted),
+      )
+      if (toolParts.length > 5) return "micro"
+      return "none"
+    })
+
+    const microCompact = Effect.fn("SessionCompaction.microCompact")(function* (input: { sessionID: SessionID }) {
+      const cfg = yield* config.get()
+      if (!cfg.compaction?.prune) return false
+      const msgs = yield* session
+        .messages({ sessionID: input.sessionID })
+        .pipe(Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)))
+      if (!msgs) return false
+
+      let total = 0
+      let pruned = 0
+      const toPrune: SessionV1.ToolPart[] = []
+      let turns = 0
+
+      for (let msgIndex = msgs.length - 1; msgIndex >= 0; msgIndex--) {
+        const msg = msgs[msgIndex]
+        if (msg.info.role === "user") turns++
+        if (turns < ACTIVE_WINDOW_TURNS) continue
+        if (msg.info.role === "assistant" && msg.info.summary) break
+        for (let partIndex = msg.parts.length - 1; partIndex >= 0; partIndex--) {
+          const part = msg.parts[partIndex]
+          if (part.type !== "tool") continue
+          if (part.state.status !== "completed") continue
+          if (PRUNE_PROTECTED_TOOLS.includes(part.tool)) continue
+          if (part.state.time.compacted) continue
+          const estimate = Token.estimate(part.state.output)
+          total += estimate
+          if (total <= PRUNE_PROTECT && turns <= WORKING_WINDOW_TURNS) continue
+          pruned += estimate
+          toPrune.push(part)
+        }
+      }
+
+      yield* Effect.logInfo("microCompact", { pruned, total, count: toPrune.length })
+      if (pruned <= 0) return false
+      for (const part of toPrune) {
+        if (part.state.status === "completed") {
+          part.state.time.compacted = Date.now()
+          yield* session.updatePart(part)
+        }
+      }
+      return true
+    })
+
+    // Aggressive prune that strips old tool outputs and reasoning content
+    const aggressivePrune = Effect.fn("SessionCompaction.aggressivePrune")(function* (input: { sessionID: SessionID }) {
+      const msgs = yield* session
+        .messages({ sessionID: input.sessionID })
+        .pipe(Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)))
+      if (!msgs) return false
+
+      let pruned = 0
+      let turns = 0
+      const toolUpdates: SessionV1.ToolPart[] = []
+
+      for (let msgIndex = msgs.length - 1; msgIndex >= 0; msgIndex--) {
+        const msg = msgs[msgIndex]
+        if (msg.info.role === "user") turns++
+        if (turns <= ACTIVE_WINDOW_TURNS) continue
+        if (msg.info.role === "assistant" && msg.info.summary) break
+
+        // Strip reasoning content from old messages
+        if (msg.info.role === "assistant" && turns > ACTIVE_WINDOW_TURNS + 1) {
+          for (const part of msg.parts) {
+            if (part.type === "reasoning" && part.text) {
+              const text = part.text
+              ;(part as any).text = `[reasoning: ${Token.estimate(text)} tokens]`
+              pruned += Token.estimate(text)
+            }
+          }
+        }
+
+        // Aggressively prune tool outputs
+        for (const part of msg.parts) {
+          if (part.type !== "tool") continue
+          if (part.state.status !== "completed") continue
+          if (PRUNE_PROTECTED_TOOLS.includes(part.tool)) continue
+          if (part.state.time.compacted) continue
+          part.state.time.compacted = Date.now()
+          toolUpdates.push(part)
+          pruned += Token.estimate(part.state.output)
+        }
+      }
+
+      for (const part of toolUpdates) {
+        yield* session.updatePart(part)
+      }
+
+      yield* Effect.logInfo("aggressivePrune", { pruned, toolCount: toolUpdates.length })
+      return pruned > PRUNE_MINIMUM
+    })
+
+    // --- Supervisor state ---
+
+    let supervisorState: SupervisorState = {
+      consecutiveFailures: 0,
+      lastFailureAt: null,
+      lastToolId: null,
+      strategy: "retry",
+      cooldownUntil: null,
+    }
+
+    const resetSupervisor = Effect.fn("SessionCompaction.resetSupervisor")(function* () {
+      supervisorState = {
+        consecutiveFailures: 0,
+        lastFailureAt: null,
+        lastToolId: null,
+        strategy: "retry",
+        cooldownUntil: null,
+      }
+    })
+
+    const checkSupervisor = Effect.fn("SessionCompaction.checkSupervisor")(function* (input: {
+      toolId: string
+      toolName: string
+      error: string
+    }) {
+      const now = Date.now()
+
+      // Cooldown check
+      if (supervisorState.cooldownUntil && now < supervisorState.cooldownUntil) {
+        return supervisorState.strategy
+      }
+
+      // Same tool failure
+      if (input.toolId === supervisorState.lastToolId) {
+        supervisorState.consecutiveFailures++
+      } else {
+        supervisorState.consecutiveFailures = 1
+        supervisorState.lastToolId = input.toolId
+      }
+
+      supervisorState.lastFailureAt = now
+
+      if (supervisorState.consecutiveFailures >= SUPERVISOR_RETRY_THRESHOLD * 2) {
+        supervisorState.strategy = "skip"
+        supervisorState.cooldownUntil = now + SUPERVISOR_COOLDOWN_MS * 2
+        yield* Effect.logWarning("supervisor: escalating to skip", { tool: input.toolName, failures: supervisorState.consecutiveFailures })
+      } else if (supervisorState.consecutiveFailures >= SUPERVISOR_RETRY_THRESHOLD) {
+        supervisorState.strategy = "switch-agent"
+        supervisorState.cooldownUntil = now + SUPERVISOR_COOLDOWN_MS
+        yield* Effect.logWarning("supervisor: switching agent strategy", { tool: input.toolName, failures: supervisorState.consecutiveFailures })
+      } else {
+        supervisorState.strategy = "retry"
+      }
+
+      return supervisorState.strategy
+    })
+
     // goes backwards through parts until there are PRUNE_PROTECT tokens worth of tool
     // calls, then erases output of older tool calls to free context space
     const prune = Effect.fn("SessionCompaction.prune")(function* (input: { sessionID: SessionID }) {
       const cfg = yield* config.get()
       if (!cfg.compaction?.prune) return
       yield* Effect.logInfo("pruning")
+      // Try micro compaction first (non-destructive, fast)
+      const didMicro = yield* microCompact({ sessionID: input.sessionID })
 
       const msgs = yield* session
         .messages({ sessionID: input.sessionID })
@@ -303,6 +537,46 @@ export const layer = Layer.effect(
       auto: boolean
       overflow?: boolean
     }) {
+      // Determine appropriate compaction tier
+      const lastAssistant = input.messages.findLast((m): m is SessionV1.WithParts & { info: SessionV1.Assistant } =>
+        m.info.role === "assistant" && m.info.finish !== undefined,
+      )
+      let compactionTier: CompactionTier = "mid"
+      if (lastAssistant) {
+        const model = lastAssistant.info.modelID
+          ? yield* provider.getModel(lastAssistant.info.providerID, lastAssistant.info.modelID).pipe(
+              Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined as Provider.Model | undefined)),
+            )
+          : undefined
+        if (model) {
+          compactionTier = yield* selectTier({
+            tokens: lastAssistant.info.tokens,
+            model,
+            messages: input.messages,
+          })
+        }
+      }
+
+      yield* Effect.logInfo("compaction: selected tier", {
+        tier: compactionTier,
+        auto: input.auto,
+        overflow: input.overflow,
+      })
+
+      // Tier 0: Microcompaction - just prune tool outputs and return
+      if (compactionTier === "micro") {
+        const didPrune = yield* microCompact({ sessionID: input.sessionID })
+        if (didPrune) return "continue"
+        // Fall through to at least light if micro didn't help
+      }
+
+      // Tier 1: Light compaction - aggressive prune + strip reasoning
+      if (compactionTier === "light") {
+        const didPrune = yield* aggressivePrune({ sessionID: input.sessionID })
+        if (didPrune && input.auto) return "continue"
+        // Fall through to mid if light wasn't enough
+      }
+
       const parent = input.messages.findLast((m) => m.info.id === input.parentID)
       if (!parent || parent.info.role !== "user") {
         throw new Error(`Compaction parent must be a user message: ${input.parentID}`)
@@ -525,6 +799,9 @@ export const layer = Layer.effect(
         }
       }
 
+      // Reset supervisor on successful compaction
+      yield* resetSupervisor()
+
       if (processor.message.error) return "stop"
       if (result === "continue") {
         const summary = summaryText(
@@ -546,7 +823,7 @@ export const layer = Layer.effect(
               recent,
             })
         }
-        yield* events.publish(Event.Compacted, { sessionID: input.sessionID })
+        yield* events.publish(Event.Compacted, { sessionID: input.sessionID, tier: compactionTier })
       }
       return result
     })
@@ -589,6 +866,10 @@ export const layer = Layer.effect(
       prune,
       process: processCompaction,
       create,
+      selectTier,
+      microCompact,
+      checkSupervisor,
+      resetSupervisor,
     })
   }),
 )

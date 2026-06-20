@@ -20,6 +20,7 @@ import { PartID } from "./schema"
 import { EffectBridge } from "@/effect/bridge"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
+import { Planning, PlanSchema, validatePlan } from "./planning"
 
 export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   agent: Agent.Info
@@ -104,6 +105,19 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID, args },
               output,
             )
+            // Validate write/edit/delete tools against the active plan
+            if (["write", "edit", "delete", "shell"].includes(item.id)) {
+              const filesAffected: string[] = []
+              const fileArg = (args as any).filePath ?? (args as any).filepath ?? (args as any).path
+              if (fileArg) filesAffected.push(fileArg)
+              if (filesAffected.length > 0) {
+                yield* validatePlan({
+                  sessionID: ctx.sessionID,
+                  messageID: input.processor.message.id,
+                  files: filesAffected,
+                }).pipe(Effect.ignore)
+              }
+            }
             if (options.abortSignal?.aborted) {
               yield* input.processor.completeToolCall(options.toolCallId, output)
             }
@@ -113,6 +127,50 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       },
     })
   }
+
+  tools["plan"] = tool({
+    description: "Declare your plan before making multi-file changes. Call this tool first to outline the goal, affected files, and step-by-step actions.",
+    inputSchema: jsonSchema({
+      type: "object",
+      properties: {
+        goal: { type: "string", description: "Overall goal of the changes" },
+        files: { type: "array", items: { type: "string" }, description: "Files that will be modified" },
+        steps: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              action: { type: "string", description: "Action type (read, write, edit, delete, etc.)" },
+              file: { type: "string", description: "Target file" },
+              description: { type: "string", description: "What this step does" },
+            },
+            required: ["action", "file", "description"],
+          },
+          description: "Step-by-step actions",
+        },
+      },
+      required: ["goal", "files", "steps"],
+    }),
+    execute(args: any, options: any) {
+      return run.promise(
+        Effect.gen(function* () {
+          yield* Planning.recordPlan({
+            messageID: options.toolCallId,
+            sessionID: input.session.id,
+            goal: args.goal,
+            files: args.files,
+            steps: args.steps,
+          })
+          return {
+            title: "Plan recorded",
+            metadata: {},
+            output: `Plan recorded: ${args.goal}\nFiles: ${args.files.join(", ")}\nSteps: ${args.steps.length}`,
+            content: [{ type: "text" as const, text: `Plan recorded: ${args.goal}` }],
+          }
+        }),
+      )
+    },
+  })
 
   for (const [key, item] of Object.entries(yield* mcp.tools())) {
     const execute = item.execute
