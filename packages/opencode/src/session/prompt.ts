@@ -41,6 +41,7 @@ import { ShellID } from "@/tool/shell/id"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Truncate } from "@/tool/truncate"
 import { Image } from "@/image/image"
+import { Video } from "@/video/video"
 import { decodeDataUrl } from "@/util/data-url"
 import { Process } from "@/util/process"
 import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
@@ -115,6 +116,7 @@ export const layer = Layer.effect(
     const registry = yield* ToolRegistry.Service
     const truncate = yield* Truncate.Service
     const image = yield* Image.Service
+    const video = yield* Video.Service
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const scope = yield* Scope.Scope
     const instruction = yield* Instruction.Service
@@ -932,6 +934,43 @@ export const layer = Layer.effect(
                 ]
               }
 
+              if (mime.startsWith("video/")) {
+                const videoDir = path.join(os.tmpdir(), "opencode-videos")
+                yield* fsys.makeDirectory(videoDir, { recursive: true }).pipe(Effect.catch(() => Effect.void))
+                const ext = path.extname(filepath)
+                const videoFile = path.join(videoDir, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`)
+                yield* fsys.copyFile(filepath, videoFile).pipe(Effect.catch(() => Effect.void))
+                const result = yield* video.extract({ filePath: videoFile, mime }).pipe(
+                  Effect.catch(() => Effect.succeed({ metadata: "", thumbnailPath: undefined, thumbnailMime: "image/jpeg" })),
+                )
+                const pieces: Array<Draft<SessionV1.Part>> = [
+                  {
+                    messageID: info.id,
+                    sessionID: input.sessionID,
+                    type: "text",
+                    synthetic: true,
+                    text: result.metadata
+                      ? `[Video file saved: ${videoFile}]\nVideo metadata:\n${result.metadata}`
+                      : `[Video file saved: ${videoFile}]`,
+                  },
+                ]
+                if (result.thumbnailPath) {
+                  const thumbData = yield* fsys.readFile(result.thumbnailPath).pipe(Effect.catch(() => Effect.succeed(Buffer.alloc(0))))
+                  if (thumbData.length > 0) {
+                    pieces.push({
+                      id: part.id,
+                      messageID: info.id,
+                      sessionID: input.sessionID,
+                      type: "file",
+                      url: `data:${result.thumbnailMime};base64,${thumbData.toString("base64")}`,
+                      mime: result.thumbnailMime,
+                      filename: `thumbnail-${path.basename(videoFile, ext)}.jpg`,
+                    })
+                  }
+                }
+                return pieces
+              }
+
               return [
                 {
                   messageID: info.id,
@@ -1621,7 +1660,7 @@ export const defaultLayer = Layer.suspend(() =>
     Layer.provide(Session.defaultLayer),
     Layer.provide(SessionRevert.defaultLayer),
     Layer.provide(SessionSummary.defaultLayer),
-    Layer.provide(Image.defaultLayer),
+    Layer.provide(Layer.mergeAll(Image.defaultLayer, Video.defaultLayer)),
     Layer.provide(
       Layer.mergeAll(
         Agent.defaultLayer,
@@ -1756,6 +1795,7 @@ export const node = LayerNode.make(layer, [
   ToolRegistry.node,
   Truncate.node,
   Image.node,
+  Video.node,
   CrossSpawnSpawner.node,
   Instruction.node,
   SessionRunState.node,

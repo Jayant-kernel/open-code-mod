@@ -15,6 +15,7 @@ import { Tools } from "./tools"
 
 export const name = "read"
 const SUPPORTED_IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
+const SUPPORTED_VIDEO_MIMES = new Set(["video/mp4", "video/webm", "video/ogg", "video/quicktime", "video/x-msvideo", "video/x-matroska", "video/mpeg"])
 const LocationInput = Schema.Struct({
   path: Schema.String,
   offset: ReadToolFileSystem.PageInput.fields.offset.annotate({
@@ -81,6 +82,15 @@ export const layer = Layer.effectDiscard(
                 return yield* image
                   .normalize(resource, { ...content, encoding: "base64" })
                   .pipe(Effect.catchTag("Image.ResizerUnavailableError", () => Effect.succeed(content)))
+              }
+              if ("encoding" in content && content.encoding === "base64" && SUPPORTED_VIDEO_MIMES.has(content.mime)) {
+                return {
+                  uri: content.uri,
+                  name: content.name,
+                  content: `[Video file: ${resource}]`,
+                  encoding: "utf8" as const,
+                  mime: "text/plain" as const,
+                } satisfies FileSystem.Content
               }
               if ("encoding" in content && content.encoding === "base64")
                 return yield* Effect.fail(new ReadToolFileSystem.BinaryFileError(resource))

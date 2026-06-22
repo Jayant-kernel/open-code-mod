@@ -580,7 +580,9 @@ export const layer = Layer.effect(
                     ),
                     Effect.exit,
                   )
-                : Effect.succeed(Exit.succeed<SessionV1.FilePart>(attachment)),
+                : attachment.mime.startsWith("video/")
+                  ? Effect.succeed(Exit.succeed(attachment))
+                  : Effect.succeed(Exit.succeed<SessionV1.FilePart>(attachment)),
             )
             const omitted = normalized.filter(Exit.isFailure).length
             const attachments = normalized.filter(Exit.isSuccess).map((item) => item.value)
