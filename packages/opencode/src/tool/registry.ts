@@ -25,6 +25,7 @@ import z from "zod"
 import { Plugin } from "../plugin"
 import { Provider } from "@/provider/provider"
 
+import { ComputerOpenTool, ComputerProcessTool, ComputerSystemTool, ComputerDesktopTool } from "./computer"
 import { WebSearchTool } from "./websearch"
 import { LspTool } from "./lsp"
 import * as Truncate from "./truncate"
@@ -105,6 +106,10 @@ export const layer = Layer.effect(
     const greptool = yield* GrepTool
     const patchtool = yield* ApplyPatchTool
     const skilltool = yield* SkillTool
+    const computeropen = yield* ComputerOpenTool
+    const computerprocess = yield* ComputerProcessTool
+    const computersystem = yield* ComputerSystemTool
+    const computerdesktop = yield* ComputerDesktopTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -212,6 +217,10 @@ export const layer = Layer.effect(
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
+          computeropen: Tool.init(computeropen),
+          computerprocess: Tool.init(computerprocess),
+          computersystem: Tool.init(computersystem),
+          computerdesktop: Tool.init(computerdesktop),
         })
 
         return {
@@ -233,6 +242,10 @@ export const layer = Layer.effect(
             tool.patch,
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
+            tool.computeropen,
+            tool.computerprocess,
+            tool.computersystem,
+            tool.computerdesktop,
           ],
           task: tool.task,
           read: tool.read,
