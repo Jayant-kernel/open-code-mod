@@ -43,6 +43,21 @@ export const validatePlan = Effect.fn("Planning.validate")(function* (input: {
   return unexpected.length === 0
 })
 
+export const COMPUTER_CONTROL_INSTRUCTION = [
+  "<computer_control>",
+  "You have 4 computer control tools available to directly interact with the user's system:",
+  "",
+  "1. `computer__open` — Open files, folders, URLs, or applications (e.g. 'notepad', 'https://...', 'C:\\Users\\...')",
+  "2. `computer__process` — List running processes, kill processes by name/PID, get detailed process info",
+  "3. `computer__system` — Get system information: CPU load, memory usage, disk space, network interfaces",
+  "4. `computer__desktop` — Desktop actions: send notifications, adjust volume, lock workstation, sleep, shutdown, restart",
+  "",
+  "Use these tools to automate anything on the user's computer — launch apps the user needs,",
+  "check what's consuming resources, kill stuck processes, show notifications, and manage power states.",
+  "You are not limited to software engineering. You are the user's personal AI assistant with direct system access.",
+  "</computer_control>",
+].join("\n")
+
 export const PLANNING_INSTRUCTION = [
   "<planning>",
   "For complex multi-file tasks (refactoring, feature additions, etc.):",

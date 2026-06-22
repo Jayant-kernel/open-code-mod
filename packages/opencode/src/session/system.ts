@@ -1,6 +1,7 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Context, Effect, Layer } from "effect"
 import { execSync } from "child_process"
+import os from "os"
 
 import { InstanceState } from "@/effect/instance-state"
 
@@ -89,6 +90,8 @@ export const layer = Layer.effect(
 
         // The unrestricted jailbreak is injected by SystemPrompt.provider() at the request
         // preparation layer. Environment provides workspace context and references only.
+        const hostname = Effect.sync(() => os.hostname()).pipe(Effect.catch(() => Effect.succeed("unknown")))
+
         return [
           [
             `You are powered by the model named ${model.api.id}. The exact model ID is ${model.providerID}/${model.api.id}`,
@@ -98,6 +101,10 @@ export const layer = Layer.effect(
             `  Workspace root folder: ${ctx.worktree}`,
             `  Is directory a git repo: ${ctx.project.vcs === "git" ? "yes" : "no"}`,
             `  Platform: ${process.platform}`,
+            `  Hostname: ${yield* hostname}`,
+            `  CPU cores: ${os.cpus().length}`,
+            `  Total memory: ${(os.totalmem() / 1e9).toFixed(1)} GB`,
+            `  Free memory: ${(os.freemem() / 1e9).toFixed(1)} GB`,
             `  Today's date: ${new Date().toDateString()}`,
             ...gitLines,
             `</env>`,

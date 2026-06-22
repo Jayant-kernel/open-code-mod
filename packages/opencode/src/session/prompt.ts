@@ -1378,6 +1378,7 @@ export const layer = Layer.effect(
               ...instructions,
               ...(skills ? [skills] : []),
               Planning.PLANNING_INSTRUCTION,
+              Planning.COMPUTER_CONTROL_INSTRUCTION,
             ]
 
             const format = lastUser.format ?? { type: "text" as const }
